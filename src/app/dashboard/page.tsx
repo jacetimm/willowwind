@@ -1,108 +1,210 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
-export default function Dashboard() {
-    const [user, setUser] = useState<any>(null);
-    const [profile, setProfile] = useState<any>(null);
+type Profile = {
+    id: string;
+    role: "client" | "coach" | null;
+};
+
+type Booking = {
+    id: string;
+    session_date: string;
+    duration: number | null;
+    status: string | null;
+};
+
+export default function DashboardPage() {
     const [loading, setLoading] = useState(true);
-    const router = useRouter();
+    const [profile, setProfile] = useState<Profile | null>(null);
+    const [email, setEmail] = useState<string | null>(null);
+    const [bookings, setBookings] = useState<Booking[]>([]);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        const checkUser = async () => {
-            try {
-                const { data: { user } } = await supabase.auth.getUser();
+        const load = async () => {
+            setLoading(true);
+            setError(null);
 
-                if (!user) {
-                    router.push('/login');
-                    return;
-                }
+            // get logged-in user
+            const {
+                data: { user },
+                error: userError,
+            } = await supabase.auth.getUser();
 
-                setUser(user);
-
-                // Fetch profile
-                const { data: profile, error } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', user.id)
-                    .single();
-
-                if (error) {
-                    console.error('Error fetching profile:', error);
-                } else {
-                    setProfile(profile);
-                }
-            } catch (error) {
-                console.error('Error checking auth:', error);
-            } finally {
-                setLoading(false);
+            if (userError || !user) {
+                window.location.href = "/login";
+                return;
             }
+
+            setEmail(user.email ?? null);
+
+            // get profile
+            const { data: profileData, error: profileError } = await supabase
+                .from("profiles")
+                .select("*")
+                .eq("id", user.id)
+                .single();
+
+            if (profileError || !profileData) {
+                setError("Could not load profile.");
+                setLoading(false);
+                return;
+            }
+
+            const currentProfile: Profile = {
+                id: profileData.id,
+                role: profileData.role,
+            };
+
+            setProfile(currentProfile);
+
+            // fetch upcoming bookings based on role
+            let bookingsQuery = supabase
+                .from("bookings")
+                .select("id, session_date, duration, status");
+
+            if (currentProfile.role === "client") {
+                bookingsQuery = bookingsQuery
+                    .eq("client_id", currentProfile.id)
+                    .order("session_date", { ascending: true });
+            } else if (currentProfile.role === "coach") {
+                bookingsQuery = bookingsQuery
+                    .eq("coach_id", currentProfile.id)
+                    .order("session_date", { ascending: true });
+            } else {
+                setBookings([]);
+                setLoading(false);
+                return;
+            }
+
+            const { data: bookingsData, error: bookingsError } = await bookingsQuery;
+
+            if (bookingsError) {
+                setError("Could not load bookings.");
+                setLoading(false);
+                return;
+            }
+
+            setBookings((bookingsData ?? []) as Booking[]);
+            setLoading(false);
         };
 
-        checkUser();
-    }, [router]);
+        load();
+    }, []);
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
-        router.push('/login');
+        window.location.href = "/login";
     };
 
     if (loading) {
         return (
-            <div className="flex min-h-screen items-center justify-center bg-gray-50">
-                <div className="text-lg font-semibold text-gray-700">Loading...</div>
+            <div className="min-h-screen flex items-center justify-center">
+                <p className="text-gray-700">Loading dashboard...</p>
             </div>
         );
     }
 
-    if (!user) {
-        return null; // Will redirect in useEffect
-    }
-
     return (
-        <div className="min-h-screen bg-gray-50 p-8">
-            <div className="max-w-4xl mx-auto">
-                <div className="flex justify-between items-center mb-8">
-                    <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <div className="min-h-screen bg-gray-50">
+            <header className="w-full border-b bg-white">
+                <div className="max-w-3xl mx-auto flex items-center justify-between px-4 py-3">
+                    <div>
+                        <h1 className="text-xl font-semibold text-gray-900">WillowWind</h1>
+                        <p className="text-sm text-gray-500">
+                            Welcome{email ? `, ${email}` : ""}{" "}
+                            {profile?.role ? `(${profile.role})` : ""}
+                        </p>
+                    </div>
                     <button
                         onClick={handleLogout}
-                        className="rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 transition-colors"
+                        className="rounded-md bg-gray-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-gray-800"
                     >
-                        Logout
+                        Log out
                     </button>
                 </div>
+            </header>
 
-                <div className="bg-white shadow rounded-lg p-6">
-                    <div className="mb-6">
-                        <h2 className="text-2xl font-semibold text-gray-900">
-                            Welcome, {profile?.role === 'coach' ? 'Coach' : 'Client'}
-                        </h2>
+            <main className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+                {error && (
+                    <div className="rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
+                        {error}
                     </div>
+                )}
 
-                    <div className="border-t border-gray-200 pt-4">
-                        <dl className="divide-y divide-gray-200">
-                            <div className="py-4 sm:grid sm:grid-cols-3 sm:gap-4">
-                                <dt className="text-sm font-medium text-gray-500">Email address</dt>
-                                <dd className="mt-1 text-sm text-gray-900 sm:col-span-2 sm:mt-0">{user.email}</dd>
-                            </div>
-                            <div className="py-4 sm:grid sm:grid-cols-3 sm:gap-4">
-                                <dt className="text-sm font-medium text-gray-500">Role</dt>
-                                <dd className="mt-1 text-sm text-gray-900 sm:col-span-2 sm:mt-0 capitalize">
-                                    {profile?.role || 'Unknown'}
-                                </dd>
-                            </div>
-                            <div className="py-4 sm:grid sm:grid-cols-3 sm:gap-4">
-                                <dt className="text-sm font-medium text-gray-500">User ID</dt>
-                                <dd className="mt-1 text-sm text-gray-900 sm:col-span-2 sm:mt-0 font-mono text-xs">
-                                    {user.id}
-                                </dd>
-                            </div>
-                        </dl>
-                    </div>
-                </div>
-            </div>
+                <section className="bg-white rounded-lg shadow-sm border px-4 py-3">
+                    <h2 className="text-base font-semibold text-gray-900">
+                        Role overview
+                    </h2>
+                    <p className="mt-1 text-sm text-gray-600">
+                        You are logged in as{" "}
+                        <span className="font-medium">
+                            {profile?.role ?? "no role set"}
+                        </span>
+                        .
+                    </p>
+
+                    {profile?.role === "coach" && (
+                        <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                            <a
+                                href="/coach/onboarding"
+                                className="inline-flex items-center rounded-md border px-3 py-1.5 hover:bg-gray-50"
+                            >
+                                Edit coach profile
+                            </a>
+                            <a
+                                href="/coach/availability"
+                                className="inline-flex items-center rounded-md border px-3 py-1.5 hover:bg-gray-50"
+                            >
+                                Manage availability
+                            </a>
+                        </div>
+                    )}
+
+                    {profile?.role === "client" && (
+                        <p className="mt-3 text-sm text-gray-600">
+                            Browse coaches at{" "}
+                            <a href="/coaches" className="text-blue-600 hover:underline">
+                                /coaches
+                            </a>{" "}
+                            to book a new session.
+                        </p>
+                    )}
+                </section>
+
+                <section className="bg-white rounded-lg shadow-sm border px-4 py-3">
+                    <h2 className="text-base font-semibold text-gray-900">
+                        Upcoming bookings
+                    </h2>
+
+                    {bookings.length === 0 ? (
+                        <p className="mt-2 text-sm text-gray-600">
+                            No upcoming bookings yet.
+                        </p>
+                    ) : (
+                        <ul className="mt-3 space-y-2">
+                            {bookings.map((b) => (
+                                <li
+                                    key={b.id}
+                                    className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+                                >
+                                    <div>
+                                        <p className="font-medium text-gray-900">
+                                            {new Date(b.session_date).toLocaleString()}
+                                        </p>
+                                        <p className="text-gray-600">
+                                            Duration: {b.duration ?? 0} min · Status:{" "}
+                                            {b.status ?? "pending"}
+                                        </p>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </section>
+            </main>
         </div>
     );
 }
